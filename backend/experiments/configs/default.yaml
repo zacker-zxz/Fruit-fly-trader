@@ -1,0 +1,28 @@
+seed: 42
+train_fraction: 0.7
+capital: 10000
+fee_bps: 5
+slippage_bps: 5
+max_neurons: 1500
+connectome_path: "../data/connectome/flyconnectome_edges.csv"
+brain:
+  threshold: 1.0
+plasticity:
+  learning_rate: 0.01
+  trace_decay: 0.9
+  hebbian_rate: 0.002
+  weight_cap: 2.0
+pruning:
+  enabled: true
+  min_activity: 0.01
+  min_strength: 0.02
+  min_importance: 0.1
+  patience: 200
+reward:
+  scale: 10
+  duration_norm: 50
+  weights:
+    pnl: 1.0
+    drawdown: 0.5
+    volatility: 0.2
+    duration: 0.1

@@ -1,0 +1,9 @@
+__pycache__/
+.venv/
+node_modules/
+dist/
+*.pyc
+.kilo/
+data/raw/*.csv
+data/connectome/*.csv
+backend/experiments/results/*.json
