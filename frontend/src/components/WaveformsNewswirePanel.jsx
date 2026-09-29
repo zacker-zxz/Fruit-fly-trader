@@ -22,6 +22,7 @@ export default function WaveformsNewswirePanel({
   marketName = 'Gold Desk',
   isPaused = false,
 }) {
+  const wrapRef = useRef(null)
   const canvasRef = useRef(null)
   const historyRef = useRef([
     { spikes: 22, hz: 115, dopamine: 0.50, cortisol: 0.20, serotonin: 0.60, decision: 'HOLD' },
@@ -53,15 +54,20 @@ export default function WaveformsNewswirePanel({
   // Canvas render
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    const wrap = wrapRef.current
+    if (!canvas || !wrap) return
     const ctx = canvas.getContext('2d')
 
-    const dpr = window.devicePixelRatio || 1
-    const w = canvas.clientWidth || 300
-    const h = canvas.clientHeight || 120
-    if (canvas.width !== w * dpr) {
-      canvas.width = w * dpr
-      canvas.height = h * dpr
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    const w = wrap.clientWidth || 300
+    const h = wrap.clientHeight || 110
+    if (w <= 0 || h <= 0) return
+
+    const targetW = Math.round(w * dpr)
+    const targetH = Math.round(h * dpr)
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW
+      canvas.height = targetH
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
@@ -182,7 +188,7 @@ export default function WaveformsNewswirePanel({
             </span>
           </div>
 
-          <div className="waveforms-canvas-wrap">
+          <div className="waveforms-canvas-wrap" ref={wrapRef}>
             <canvas ref={canvasRef} className="waveforms-canvas" />
           </div>
         </div>

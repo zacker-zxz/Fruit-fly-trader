@@ -8,6 +8,8 @@ import WaveformsNewswirePanel from './components/WaveformsNewswirePanel.jsx'
 import WalletCard from './components/WalletCard.jsx'
 import SettingsPage from './components/SettingsPage.jsx'
 import MarketReplayModal from './components/MarketReplayModal.jsx'
+import TradeHistoryPage from './components/TradeHistoryPage.jsx'
+import MarqueeTicker from './components/MarqueeTicker.jsx'
 import { useEventStream } from './useEventStream.js'
 
 export default function App() {
@@ -21,10 +23,11 @@ export default function App() {
   const [showMarketModal, setShowMarketModal] = useState(false)
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showWalletDrawer, setShowWalletDrawer] = useState(false)
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
 
-  const stream = useEventStream(running)
+  const stream = useEventStream(true)
 
-  // Fetch available market metadata
+  // Fetch available market metadata & current simulation status
   useEffect(() => {
     fetch('/api/datasets/info')
       .then((r) => r.json())
@@ -37,18 +40,25 @@ export default function App() {
         }
       })
       .catch(() => {})
+
+    fetch('/api/simulation/status')
+      .then((r) => r.json())
+      .then((s) => {
+        if (s.status === 'running' || s.status === 'paused') {
+          setRunning(true)
+          if (s.dataset) setSelectedMarketId(s.dataset)
+          if (s.speed) setCurrentSpeed(s.speed)
+          if (s.multiplier) setCurrentMultiplier(s.multiplier)
+        }
+      })
+      .catch(() => {})
   }, [])
 
-  // Auto-start simulation on first load if idle
-  useEffect(() => {
-    if (!running && markets.length > 0) {
-      handleStartSimulation({
-        dataset: selectedMarketId || markets[0].id,
-        speed: currentSpeed,
-        multiplier: currentMultiplier,
-      })
-    }
-  }, [markets])
+  const handleStopSimulation = async () => {
+    setRunning(false)
+    stream.resetLocalState()
+    await fetch('/api/simulation/stop', { method: 'POST' }).catch(() => {})
+  }
 
   const handleSpeedChange = async (speed) => {
     setCurrentSpeed(speed)
@@ -173,9 +183,14 @@ export default function App() {
             </span>
           </div>
 
-          <div className="topbar-metric-item">
+          <div
+            className="topbar-metric-item clickable"
+            onClick={() => setShowHistoryModal(true)}
+            title="Click to view full Trade History & Ledger"
+            style={{ cursor: 'pointer' }}
+          >
             <span className="tk-label">Trades Closed</span>
-            <span className="tk-value cyan">{stream.trades.length}</span>
+            <span className="tk-value cyan">{stream.trades.length} ↗</span>
           </div>
 
           <div className="topbar-metric-item">
@@ -202,14 +217,34 @@ export default function App() {
             ))}
           </div>
 
-          {/* Pause / Play */}
-          <button
-            className={`action-btn-ctrl ${stream.isPaused ? 'paused' : ''}`}
-            onClick={handleTogglePause}
-            title={stream.isPaused ? 'Resume Whole Simulation' : 'Halt / Pause Whole Simulation'}
-          >
-            {stream.isPaused ? '▶ RESUME' : '⏸ PAUSE'}
-          </button>
+          {/* Main Simulation Control: START / (PAUSE/RESUME + STOP) */}
+          {!running ? (
+            <button
+              className="action-btn-ctrl start-btn"
+              onClick={() => handleStartSimulation({ dataset: selectedMarketId, speed: currentSpeed, multiplier: currentMultiplier })}
+              title="Launch Neural Connectome Trading Simulation"
+            >
+              ▶ START
+            </button>
+          ) : (
+            <>
+              <button
+                className={`action-btn-ctrl ${stream.isPaused ? 'paused' : ''}`}
+                onClick={handleTogglePause}
+                title={stream.isPaused ? 'Resume Whole Simulation' : 'Halt / Pause Whole Simulation'}
+              >
+                {stream.isPaused ? '▶ RESUME' : '⏸ PAUSE'}
+              </button>
+
+              <button
+                className="action-btn-ctrl stop-btn"
+                onClick={handleStopSimulation}
+                title="Stop Simulation and Return to Standby"
+              >
+                ⏹ STOP
+              </button>
+            </>
+          )}
 
           {/* Reset */}
           <button
@@ -218,6 +253,15 @@ export default function App() {
             title="Clean Master Reset"
           >
             🔄 RESET
+          </button>
+
+          {/* Trade History Ledger Trigger */}
+          <button
+            className="action-btn-ctrl"
+            onClick={() => setShowHistoryModal(true)}
+            title="Open Trade Ledger & Performance Analysis"
+          >
+            📜 LEDGER ({stream.trades.length})
           </button>
 
           {/* Wallet Drawer Trigger */}
@@ -260,6 +304,8 @@ export default function App() {
               neurotransmitters={stream.neurotransmitters}
               symbol={currentMarket.symbol || 'GOLD/INR'}
               isPaused={stream.isPaused}
+              isRunning={running}
+              onManualClose={handleManualClose}
             />
           </div>
 
@@ -325,6 +371,9 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      {/* Real Continuous Bottom Marquee Ticker */}
+      <MarqueeTicker />
 
       {/* =========================================================================
           MODALS & DRAWERS (Zero Floating Corner Artifacts)
@@ -392,6 +441,22 @@ export default function App() {
               currentMultiplier={currentMultiplier}
               onMultiplierChange={handleMultiplierChange}
               onManualClose={handleManualClose}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 4. Connectome Trade History & Performance Ledger Modal */}
+      {showHistoryModal && (
+        <div className="modal-backdrop" onClick={() => setShowHistoryModal(false)}>
+          <div className="modal-inner ledger-modal-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-close-bar">
+              <button className="modal-close-btn" onClick={() => setShowHistoryModal(false)}>✕ Close</button>
+            </div>
+            <TradeHistoryPage
+              trades={stream.trades}
+              wallet={stream.wallet}
+              equityPoints={stream.equity}
             />
           </div>
         </div>

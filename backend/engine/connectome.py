@@ -86,4 +86,8 @@ def sample(edges: list[Edge], max_neurons: int, seed: int = 0) -> Connectome:
 
 
 def from_file(path: str, max_neurons: int, seed: int = 0) -> Connectome:
+    import os
+    if not os.path.exists(path):
+        from .connectome_download import download
+        download(os.path.dirname(path))
     return sample(load_edge_list(path), max_neurons, seed)

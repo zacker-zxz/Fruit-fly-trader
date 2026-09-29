@@ -13,7 +13,8 @@ from dataclasses import dataclass, field
 import time
 from market.data_loader import Candle
 
-USD_INR_RATE = 83.75
+DEFAULT_USD_INR_RATE = 83.75
+USD_INR_RATE = DEFAULT_USD_INR_RATE  # Backward compatibility alias
 
 
 @dataclass
@@ -52,6 +53,10 @@ class MicroTradingEngine:
         stop_loss_pct: float = 0.010,
         max_hold_ticks: int = 8,
         market_currency: str = "USD",
+        usd_inr_rate: float = DEFAULT_USD_INR_RATE,
+        max_concurrent_trades: int = 3,
+        hold_ticks_min: int = 5,
+        hold_ticks_max: int = 60,
     ):
         self.currency = currency
         self.initial_capital_inr = initial_capital_inr
@@ -63,7 +68,11 @@ class MicroTradingEngine:
         self.take_profit_pct = take_profit_pct
         self.stop_loss_pct = stop_loss_pct
         self.max_hold_ticks = max_hold_ticks
+        self.max_concurrent_trades = max(1, max_concurrent_trades)
+        self.hold_ticks_min = hold_ticks_min
+        self.hold_ticks_max = hold_ticks_max
         self.market_currency = market_currency
+        self.usd_inr_rate = max(1.0, float(usd_inr_rate))
         
         self.open_trades: list[MicroTrade] = []
         self.closed_trades: list[MicroTrade] = []
@@ -89,10 +98,20 @@ class MicroTradingEngine:
     def set_multiplier(self, mult: int) -> None:
         self.default_multiplier = max(1, min(100, mult))
 
-    def update_mark(self, candle: Candle, tick: int) -> list[MicroTrade]:
-        """Mark open positions to current price; trigger automatic take-profit / stop-loss / expiry."""
+    def set_usd_inr_rate(self, rate: float) -> None:
+        """Dynamically update the USD/INR conversion rate."""
+        if rate and rate > 0:
+            self.usd_inr_rate = float(rate)
+
+    def update_mark(self, candle: Candle, tick: int, brain_state: dict | None = None) -> list[MicroTrade]:
+        """Mark open positions to current price; trigger automatic take-profit / stop-loss / brain exits."""
         newly_closed = []
         cost_rate = (self.fee_bps + self.slippage_bps) / 10000.0
+
+        b_state = brain_state or {}
+        decision = b_state.get("decision")
+        cortisol = b_state.get("cortisol", 0.2)
+        dopamine = b_state.get("dopamine", 0.5)
 
         for trade in list(self.open_trades):
             raw_ret = (candle.close - trade.entry_price) / trade.entry_price
@@ -104,15 +123,27 @@ class MicroTradingEngine:
             should_close = False
             reason = "OPEN"
 
-            # 1. Take Profit booked
-            if net_ret >= self.take_profit_pct * trade.multiplier:
+            # 1. Active Brain Reversal (Fly changes direction based on visual/cognitive shift)
+            if (trade.side == "UP" and decision == "SELL") or (trade.side == "DOWN" and decision == "BUY"):
+                should_close = True
+                reason = "BRAIN_REVERSAL"
+            # 2. Cortisol Spike (Aversive stress reflex / risk aversion after drawdown)
+            elif cortisol > 0.45 and net_ret < -0.003:
+                should_close = True
+                reason = "CORTISOL_DEFENSE"
+            # 3. Dopamine Satisfaction (Fly secures positive reward surge)
+            elif dopamine > 0.65 and net_ret >= 0.008:
+                should_close = True
+                reason = "DOPAMINE_SATISFACTION"
+            # 4. Take Profit booked
+            elif net_ret >= self.take_profit_pct * trade.multiplier:
                 should_close = True
                 reason = "PROFIT_BOOKED"
-            # 2. Stop Loss
+            # 5. Stop Loss
             elif net_ret <= -self.stop_loss_pct * trade.multiplier:
                 should_close = True
                 reason = "STOPPED_OUT"
-            # 3. Micro-holding timeout (auto-book after designated seconds/ticks)
+            # 6. Brain Stochastic Hold Horizon Expiry (5s to 50s random window)
             elif duration >= trade.max_hold_ticks:
                 should_close = True
                 reason = "EXPIRED"
@@ -122,7 +153,7 @@ class MicroTradingEngine:
                 newly_closed.append(closed)
 
         # Update equity curve
-        current_eq = self.get_wallet_summary()["equity_inr"]
+        current_eq = self.get_wallet_summary(candle.close)["equity_inr"]
         self.equity_history_inr.append(current_eq)
         self.peak_equity_inr = max(self.peak_equity_inr, current_eq)
         dd = (self.peak_equity_inr - current_eq) / self.peak_equity_inr if self.peak_equity_inr > 0 else 0.0
@@ -131,26 +162,28 @@ class MicroTradingEngine:
         return newly_closed
 
     def execute_brain_signal(self, action: str, candle: Candle, tick: int, multiplier: int | None = None) -> MicroTrade | None:
-        """Process brain directional decision ('BUY' = UP, 'SELL' = DOWN, 'HOLD' = Maintain)."""
+        """Process brain directional decision ('BUY' = UP, 'SELL' = DOWN, 'HOLD' = Maintain).
+        
+        Supports multiple concurrent positions (up to max_concurrent_trades).
+        Each trade gets a stochastic hold duration modeling the brain's variable attention span.
+        """
         mult = multiplier or self.default_multiplier
         side = "UP" if action == "BUY" else ("DOWN" if action == "SELL" else None)
         if not side:
             return None
 
-        # Check if opposite trade is open; close it first (brain reversal)
-        for t in list(self.open_trades):
-            if t.side != side:
-                raw_ret = (candle.close - t.entry_price) / t.entry_price
-                dir_ret = raw_ret if t.side == "UP" else -raw_ret
-                cost_rate = (self.fee_bps + self.slippage_bps) / 10000.0
-                self._close_trade(t, candle, tick, "BRAIN_REVERSAL", (dir_ret * t.multiplier) - cost_rate)
+        # Don't open duplicate same-direction trades within 3 ticks of each other
+        for t in self.open_trades:
+            if t.side == side and (tick - t.entry_tick) < 3:
+                return None
 
-        # Focus on 1 active trade at a time so every trade is clearly visible
-        if len(self.open_trades) >= 1:
+        # Enforce max concurrent trade limit
+        if len(self.open_trades) >= self.max_concurrent_trades:
             return None
 
-        # Calculate stake from available capital (5% of equity)
-        available = max(0.0, self.balance_inr - sum(t.stake_inr for t in self.open_trades))
+        # Calculate stake from available capital (stake_pct of available equity)
+        used_margin = sum(t.stake_inr for t in self.open_trades)
+        available = max(0.0, self.balance_inr - used_margin)
         stake = max(1000.0, available * self.stake_pct)
         if stake > available or available < 1000.0:
             return None
@@ -159,9 +192,10 @@ class MicroTradingEngine:
         cost = (self.fee_bps + self.slippage_bps) / 10000.0
         entry_px = candle.close * (1.0 + cost) if side == "UP" else candle.close * (1.0 - cost)
 
-        # Stochastic hold duration: 4 to 28 ticks (~5s to 35s+ at 1x)
+        # Brain-directed stochastic hold duration
+        # Models biological variability in the fly's attention span for each trade
         import random
-        hold_ticks = random.randint(4, 28) if self.max_hold_ticks == 8 else self.max_hold_ticks
+        hold_ticks = random.randint(self.hold_ticks_min, self.hold_ticks_max)
 
         self.trade_counter += 1
         trade = MicroTrade(
@@ -252,14 +286,17 @@ class MicroTradingEngine:
         return {
             "currency": self.currency,
             "currency_symbol": "₹" if self.currency == "INR" else "$",
+            "usd_inr_rate": round(self.usd_inr_rate, 4),
             "initial_capital_inr": round(self.initial_capital_inr, 2),
             "balance_inr": round(self.balance_inr, 2),
             "used_margin_inr": round(used_margin, 2),
             "available_margin_inr": round(available_margin, 2),
             "equity_inr": round(total_equity, 2),
+            "equity_usd": round(total_equity / self.usd_inr_rate, 2),
             "realized_pnl_inr": round(self.realized_pnl_inr, 2),
             "unrealized_pnl_inr": round(unrealized_pnl, 2),
             "total_pnl_inr": round(total_pnl, 2),
+            "total_pnl_usd": round(total_pnl / self.usd_inr_rate, 2),
             "roi_pct": round(total_roi_pct, 2),
             "total_trades": len(self.closed_trades),
             "win_trades": wins,

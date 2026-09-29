@@ -166,11 +166,42 @@ def get_available_datasets_info() -> list[dict]:
     return res
 
 
+def validate_dataset_path(dataset: str) -> str:
+    """Validates and resolves canonical path of a dataset, preventing path traversal attacks."""
+    if not dataset or not isinstance(dataset, str):
+        raise ValueError("Dataset name must be a non-empty string.")
+    
+    # Strip whitespace
+    clean_name = dataset.strip()
+    
+    # Strictly reject path traversal sequences and separators
+    if ".." in clean_name or "/" in clean_name or "\\" in clean_name or ":" in clean_name:
+        raise ValueError(f"Security error: path traversal attempt detected in dataset '{dataset}'.")
+    
+    # Require .csv extension
+    if not clean_name.lower().endswith(".csv"):
+        raise ValueError(f"Invalid dataset '{dataset}': only .csv files are permitted.")
+    
+    # Canonicalize and verify target resides strictly inside DATA_RAW_DIR
+    target_path = os.path.realpath(os.path.join(DATA_RAW_DIR, clean_name))
+    real_data_dir = os.path.realpath(DATA_RAW_DIR)
+    
+    if not target_path.startswith(real_data_dir + os.sep) and target_path != real_data_dir:
+        raise ValueError("Security error: resolved dataset path falls outside permitted directory.")
+    
+    return target_path
+
+
 def load_candles_with_offset(dataset: str, start_time: float | None = None) -> list[Candle]:
-    """Loads candles and optionally slices from a chosen start timestamp."""
-    path = os.path.join(DATA_RAW_DIR, dataset)
+    """Loads candles and optionally slices from a chosen start timestamp.
+    
+    Enforces strict path traversal validation against DATA_RAW_DIR.
+    """
+    path = validate_dataset_path(dataset)
     if not os.path.exists(path):
         ensure_datasets_exist()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset file '{dataset}' not found.")
     candles = load_csv(path)
     if start_time is not None and start_time > 0:
         # Find index >= start_time

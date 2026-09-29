@@ -27,6 +27,8 @@ export function useEventStream(enabled, onResetTrigger) {
     inferenceMs: 1.1,
     firingRateHz: 120,
     activeNeurons: 0,
+    prunedNeurons: 0,
+    prunedSynapses: 0,
     speed: 5,
     multiplier: 10,
     isPaused: false,
@@ -47,6 +49,7 @@ export function useEventStream(enabled, onResetTrigger) {
       } catch (err) {}
     }
 
+    es.addEventListener('init_history', handler('init_history'))
     es.addEventListener('tick', handler('tick'))
     es.addEventListener('trade_opened', handler('trade_opened'))
     es.addEventListener('trade_closed', handler('trade_closed'))
@@ -83,13 +86,19 @@ export function useEventStream(enabled, onResetTrigger) {
         let infMs = prev.inferenceMs
         let firingHz = prev.firingRateHz
         let activeN = prev.activeNeurons
+        let prunedN = prev.prunedNeurons || 0
+        let prunedS = prev.prunedSynapses || 0
         let spd = prev.speed
         let mult = prev.multiplier
         let paused = prev.isPaused
         let isDone = prev.done
 
         for (const { type, data } of batch) {
-          if (type === 'tick') {
+          if (type === 'init_history') {
+            if (data.candles && data.candles.length) {
+              candles = [...data.candles]
+            }
+          } else if (type === 'tick') {
             s = {
               tick: data.tick,
               ts: data.ts,
@@ -120,10 +129,14 @@ export function useEventStream(enabled, onResetTrigger) {
             s.firedIds = data.fired_ids || []
             s.totalSpikes = data.total_spikes || 0
             s.totalNeurons = data.total_neurons || 750
+            s.mushroomBodyActive = data.mushroom_body_active || 0
+            s.memoryStrength = data.memory_strength || 0
+            s.marketFeatures = data.market_features || {}
 
           } else if (type === 'trade_opened') {
             if (data.trade) {
-              openTrades = [data.trade]
+              // Append new trade (supports multiple concurrent positions)
+              openTrades = [...openTrades.filter((t) => t.trade_id !== data.trade.id && t.id !== data.trade.id), data.trade]
             }
             if (data.wallet) {
               wallet = data.wallet
@@ -143,11 +156,19 @@ export function useEventStream(enabled, onResetTrigger) {
             mult = data.multiplier
           } else if (type === 'pause_toggled') {
             paused = data.paused
+          } else if (type === 'prune') {
+            if (data.type === 'neuron_pruned') {
+              prunedN += 1
+            } else if (data.type === 'synapse_pruned') {
+              prunedS += 1
+            }
           } else if (type === 'reset') {
             candles = []
             trades = []
             openTrades = []
             equity = []
+            prunedN = 0
+            prunedS = 0
             wallet = {
               currency: 'INR',
               currency_symbol: '₹',
@@ -182,6 +203,8 @@ export function useEventStream(enabled, onResetTrigger) {
           inferenceMs: infMs,
           firingRateHz: firingHz,
           activeNeurons: activeN,
+          prunedNeurons: prunedN,
+          prunedSynapses: prunedS,
           speed: spd,
           multiplier: mult,
           isPaused: paused,

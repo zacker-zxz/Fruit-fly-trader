@@ -25,7 +25,8 @@ def test_micro_trading_engine_inr_wallet():
 
 
 def test_micro_trading_expiry():
-    engine = MicroTradingEngine(initial_capital_inr=500000.0, default_multiplier=5, max_hold_ticks=4)
+    engine = MicroTradingEngine(initial_capital_inr=500000.0, default_multiplier=5, max_hold_ticks=4,
+                                hold_ticks_min=4, hold_ticks_max=4)
     c1 = Candle(ts=1000.0, open=100.0, high=101.0, low=99.0, close=100.0, volume=500.0)
     engine.execute_brain_signal("SELL", c1, tick=1)
     
@@ -45,3 +46,19 @@ def test_dataset_manager_listing():
     symbols = [m["symbol"] for m in markets]
     assert any("BTC" in s for s in symbols)
     assert any("NIFTY" in s for s in symbols)
+
+
+def test_micro_trading_manual_close():
+    engine = MicroTradingEngine(initial_capital_inr=500000.0, default_multiplier=10)
+    c1 = Candle(ts=1000.0, open=100.0, high=101.0, low=99.0, close=100.0, volume=500.0)
+    engine.execute_brain_signal("BUY", c1, tick=1)
+    assert len(engine.open_trades) == 1
+    
+    # Manual close at tick 2
+    c2 = Candle(ts=1005.0, open=100.5, high=101.0, low=100.0, close=100.8, volume=500.0)
+    closed = engine.manual_close_all(c2, tick=2)
+    assert len(closed) == 1
+    assert closed[0].exit_reason == "MANUAL_BOOK"
+    assert len(engine.open_trades) == 0
+    assert len(engine.closed_trades) == 1
+

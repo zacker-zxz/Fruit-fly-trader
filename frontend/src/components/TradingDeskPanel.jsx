@@ -21,6 +21,8 @@ export default function TradingDeskPanel({
   firingRateHz = 237,
   neurotransmitters = { dopamine: 0.65, octopamine: 0.4 },
   symbol = 'GOLD/INR',
+  isRunning = false,
+  onManualClose = null,
 }) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -54,10 +56,22 @@ export default function TradingDeskPanel({
       ctx.fillRect(0, 0, w, h)
 
       if (!candles || candles.length === 0) {
-        ctx.fillStyle = '#64748b'
-        ctx.font = '12px JetBrains Mono, monospace'
         ctx.textAlign = 'center'
-        ctx.fillText('Awaiting market tick replay stream...', w / 2, h / 2)
+        if (isRunning) {
+          ctx.fillStyle = '#94a3b8'
+          ctx.font = '13px JetBrains Mono, monospace'
+          ctx.fillText('Connecting to market replay feed...', w / 2, h / 2 - 8)
+          ctx.fillStyle = '#64748b'
+          ctx.font = '11px JetBrains Mono, monospace'
+          ctx.fillText('Streaming real connectome ticks...', w / 2, h / 2 + 14)
+        } else {
+          ctx.fillStyle = '#34d399'
+          ctx.font = '13px JetBrains Mono, monospace'
+          ctx.fillText('STANDBY — Click [▶ START] to begin simulation', w / 2, h / 2 - 8)
+          ctx.fillStyle = '#64748b'
+          ctx.font = '11px JetBrains Mono, monospace'
+          ctx.fillText('Drosophila connectome neural trading ready', w / 2, h / 2 + 14)
+        }
         return
       }
 
@@ -81,14 +95,17 @@ export default function TradingDeskPanel({
       let maxVol = 1
 
       for (const c of visible) {
-        if (c.low < minP) minP = c.low
-        if (c.high > maxP) maxP = c.high
-        if (c.volume > maxVol) maxVol = c.volume
+        const low = Number(c.low)
+        const high = Number(c.high)
+        const vol = Number(c.volume) || 0
+        if (!isNaN(low) && low < minP) minP = low
+        if (!isNaN(high) && high > maxP) maxP = high
+        if (!isNaN(vol) && vol > maxVol) maxVol = vol
       }
 
-      if (minP === maxP) {
-        minP -= 1
-        maxP += 1
+      if (minP === maxP || minP === Infinity) {
+        minP = (visible[0]?.close || 100) - 1
+        maxP = (visible[0]?.close || 100) + 1
       }
 
       const pPad = (maxP - minP) * 0.08 || 1
@@ -99,8 +116,8 @@ export default function TradingDeskPanel({
       const getY = (p) => mainH - ((p - minP) / pRange) * mainH
       const getVolY = (v) => chartH - (v / maxVol) * volH
 
-      const slotW = chartW / visible.length
-      const candleW = Math.max(2, slotW * 0.72)
+      const slotW = chartW / Math.max(visible.length, 25)
+      const candleW = Math.max(3, Math.min(18, slotW * 0.72))
 
       // --- 1. Grid Lines ---
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)'
@@ -125,21 +142,22 @@ export default function TradingDeskPanel({
       for (let i = 0; i < visible.length; i++) {
         const c = visible[i]
         const x = i * slotW + slotW / 2
-        const vy = getVolY(c.volume)
-        const isBull = c.close >= c.open
-        ctx.fillStyle = isBull ? 'rgba(16, 185, 129, 0.18)' : 'rgba(239, 68, 68, 0.18)'
+        const vy = getVolY(Number(c.volume) || 0)
+        const isBull = Number(c.close) >= Number(c.open)
+        ctx.fillStyle = isBull ? 'rgba(16, 185, 129, 0.22)' : 'rgba(239, 68, 68, 0.22)'
         ctx.fillRect(x - candleW / 2, vy, candleW, chartH - vy)
       }
 
       // --- 3. EMA Line (9-period fast EMA) ---
       if (visible.length > 5) {
-        ctx.strokeStyle = 'rgba(6, 182, 212, 0.7)'
-        ctx.lineWidth = 1.2
+        ctx.strokeStyle = 'rgba(6, 182, 212, 0.8)'
+        ctx.lineWidth = 1.3
         ctx.beginPath()
-        let ema = visible[0].close
+        let ema = Number(visible[0].close)
         const k = 2 / (9 + 1)
         for (let i = 0; i < visible.length; i++) {
-          ema = visible[i].close * k + ema * (1 - k)
+          const cClose = Number(visible[i].close)
+          ema = cClose * k + ema * (1 - k)
           const x = i * slotW + slotW / 2
           const y = getY(ema)
           if (i === 0) ctx.moveTo(x, y)
@@ -152,13 +170,17 @@ export default function TradingDeskPanel({
       for (let i = 0; i < visible.length; i++) {
         const c = visible[i]
         const x = i * slotW + slotW / 2
-        const isBull = c.close >= c.open
+        const open = Number(c.open)
+        const close = Number(c.close)
+        const high = Number(c.high)
+        const low = Number(c.low)
+        const isBull = close >= open
         const color = isBull ? '#10b981' : '#ef4444'
 
-        const yOpen = getY(c.open)
-        const yClose = getY(c.close)
-        const yHigh = getY(c.high)
-        const yLow = getY(c.low)
+        const yOpen = getY(open)
+        const yClose = getY(close)
+        const yHigh = getY(high)
+        const yLow = getY(low)
 
         // Wick
         ctx.strokeStyle = color
@@ -171,7 +193,7 @@ export default function TradingDeskPanel({
         // Body
         ctx.fillStyle = color
         const bTop = Math.min(yOpen, yClose)
-        const bH = Math.max(1.5, Math.abs(yClose - yOpen))
+        const bH = Math.max(2.5, Math.abs(yClose - yOpen))
         ctx.fillRect(x - candleW / 2, bTop, candleW, bH)
 
         // Time labels every few candles
@@ -300,9 +322,20 @@ export default function TradingDeskPanel({
             {decision === 'BUY' ? '▲ BUY / UP' : decision === 'SELL' ? '▼ SELL / DOWN' : 'HOLD / SENSING'}
           </span>
           {activeTrade && (
-            <span className="active-trade-indicator">
-              IN TRADE: {activeTrade.side} {activeTrade.multiplier}x ({activeTrade.unrealized_pnl_inr >= 0 ? '+' : ''}{sym}{activeTrade.unrealized_pnl_inr?.toFixed(2)})
-            </span>
+            <div className="active-trade-indicator-group">
+              <span className="active-trade-indicator">
+                IN TRADE: {activeTrade.side} {activeTrade.multiplier}x ({activeTrade.unrealized_pnl_inr >= 0 ? '+' : ''}{sym}{activeTrade.unrealized_pnl_inr?.toFixed(2)})
+              </span>
+              {onManualClose && (
+                <button
+                  className="quick-close-btn"
+                  onClick={onManualClose}
+                  title="Close and book position at market"
+                >
+                  ⚡ Close
+                </button>
+              )}
+            </div>
           )}
         </div>
 
