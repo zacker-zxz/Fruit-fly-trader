@@ -273,8 +273,24 @@ def reset_simulation() -> dict:
 
 @app.post("/api/simulation/stop")
 def stop_simulation() -> dict:
-    """Stops the active simulation runner and cleanly returns to standby."""
-    return reset_simulation()
+    """Stops/pauses the active simulation runner without resetting chart or trade data."""
+    global active_runner
+    if active_runner:
+        active_runner.is_paused = True
+        _on_event({"type": "pause_toggled", "paused": True})
+        return {"status": "stopped", "paused": True}
+    return {"status": "no_active_runner"}
+
+
+@app.post("/api/simulation/resume")
+def resume_simulation() -> dict:
+    """Resumes the active simulation runner from the stopped point."""
+    global active_runner
+    if active_runner:
+        active_runner.is_paused = False
+        _on_event({"type": "pause_toggled", "paused": False})
+        return {"status": "resumed", "paused": False}
+    return {"status": "no_active_runner"}
 
 
 @app.post("/api/simulation/manual_close")

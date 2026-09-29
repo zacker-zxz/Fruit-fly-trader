@@ -15,7 +15,7 @@ import { useEventStream } from './useEventStream.js'
 export default function App() {
   const [markets, setMarkets] = useState([])
   const [selectedMarketId, setSelectedMarketId] = useState('GOLD_INR_1h.csv')
-  const [running, setRunning] = useState(false)
+  const [hasStarted, setHasStarted] = useState(false)
   const [currentSpeed, setCurrentSpeed] = useState(1)
   const [currentMultiplier, setCurrentMultiplier] = useState(10)
 
@@ -44,8 +44,15 @@ export default function App() {
     fetch('/api/simulation/status')
       .then((r) => r.json())
       .then((s) => {
-        if (s.status === 'running' || s.status === 'paused') {
-          setRunning(true)
+        if (s.status === 'running') {
+          setHasStarted(true)
+          stream.setPaused(false)
+          if (s.dataset) setSelectedMarketId(s.dataset)
+          if (s.speed) setCurrentSpeed(s.speed)
+          if (s.multiplier) setCurrentMultiplier(s.multiplier)
+        } else if (s.status === 'paused') {
+          setHasStarted(true)
+          stream.setPaused(true)
           if (s.dataset) setSelectedMarketId(s.dataset)
           if (s.speed) setCurrentSpeed(s.speed)
           if (s.multiplier) setCurrentMultiplier(s.multiplier)
@@ -54,48 +61,9 @@ export default function App() {
       .catch(() => {})
   }, [])
 
-  const handleStopSimulation = async () => {
-    setRunning(false)
-    stream.resetLocalState()
-    await fetch('/api/simulation/stop', { method: 'POST' }).catch(() => {})
-  }
-
-  const handleSpeedChange = async (speed) => {
-    setCurrentSpeed(speed)
-    await fetch('/api/simulation/speed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ speed }),
-    }).catch(() => {})
-  }
-
-  const handleMultiplierChange = async (multiplier) => {
-    setCurrentMultiplier(multiplier)
-    await fetch('/api/simulation/multiplier', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ multiplier }),
-    }).catch(() => {})
-  }
-
-  const handleTogglePause = async () => {
-    const nextPaused = !stream.isPaused
-    stream.setPaused(nextPaused)
-    try {
-      const res = await fetch('/api/simulation/pause', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paused: nextPaused }),
-      })
-      const data = await res.json()
-      if (data && data.paused !== undefined) {
-        stream.setPaused(data.paused)
-      }
-    } catch (err) {}
-  }
-
-  const handleStartSimulation = async (params) => {
-    setRunning(true)
+  const handleStartSimulation = async (params = {}) => {
+    setHasStarted(true)
+    stream.setPaused(false)
     stream.resetLocalState()
     if (params.dataset) setSelectedMarketId(params.dataset)
     if (params.speed) setCurrentSpeed(params.speed)
@@ -115,10 +83,41 @@ export default function App() {
     }).catch(() => {})
   }
 
+  const handleStopSimulation = async () => {
+    // Stop simulation in place — DO NOT reset chart or trade results!
+    stream.setPaused(true)
+    await fetch('/api/simulation/stop', { method: 'POST' }).catch(() => {})
+  }
+
+  const handleResumeSimulation = async () => {
+    // Resume simulation from where it was stopped
+    stream.setPaused(false)
+    await fetch('/api/simulation/resume', { method: 'POST' }).catch(() => {})
+  }
+
   const handleResetSystem = async () => {
-    setRunning(false)
+    // Separate Master Reset — wipes chart, trades, and returns to initial START
+    setHasStarted(false)
     stream.resetLocalState()
     await fetch('/api/simulation/reset', { method: 'POST' }).catch(() => {})
+  }
+
+  const handleSpeedChange = async (speed) => {
+    setCurrentSpeed(speed)
+    await fetch('/api/simulation/speed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speed }),
+    }).catch(() => {})
+  }
+
+  const handleMultiplierChange = async (multiplier) => {
+    setCurrentMultiplier(multiplier)
+    await fetch('/api/simulation/multiplier', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ multiplier }),
+    }).catch(() => {})
   }
 
   const handleManualClose = async () => {
@@ -195,13 +194,13 @@ export default function App() {
 
           <div className="topbar-metric-item">
             <span className="tk-label">Status</span>
-            <span className={`tk-value ${stream.isPaused ? 'gold' : running ? 'green' : ''}`}>
-              {stream.isPaused ? '⏸ PAUSED' : running ? `● LIVE (${currentSpeed}x)` : 'STANDBY'}
+            <span className={`tk-value ${!hasStarted ? '' : stream.isPaused ? 'gold' : 'green'}`}>
+              {!hasStarted ? 'STANDBY' : stream.isPaused ? '⏹ STOPPED' : `● LIVE (${currentSpeed}x)`}
             </span>
           </div>
         </div>
 
-        {/* Global Controls: Speed, Play/Pause, Reset, Settings, Wallet */}
+        {/* Global Controls: Speed, Start / Stop / Resume, Reset, Settings, Wallet */}
         <div className="header-right-cluster">
           {/* Simulation Speed Switcher */}
           <div className="speed-pills-bar">
@@ -217,8 +216,8 @@ export default function App() {
             ))}
           </div>
 
-          {/* Main Simulation Control: START / (PAUSE/RESUME + STOP) */}
-          {!running ? (
+          {/* Main Simulation Control: START initially, then STOP and RESUME */}
+          {!hasStarted ? (
             <button
               className="action-btn-ctrl start-btn"
               onClick={() => handleStartSimulation({ dataset: selectedMarketId, speed: currentSpeed, multiplier: currentMultiplier })}
@@ -226,31 +225,29 @@ export default function App() {
             >
               ▶ START
             </button>
+          ) : stream.isPaused ? (
+            <button
+              className="action-btn-ctrl resume-btn"
+              onClick={handleResumeSimulation}
+              title="Resume Simulation from current point"
+            >
+              ▶ RESUME
+            </button>
           ) : (
-            <>
-              <button
-                className={`action-btn-ctrl ${stream.isPaused ? 'paused' : ''}`}
-                onClick={handleTogglePause}
-                title={stream.isPaused ? 'Resume Whole Simulation' : 'Halt / Pause Whole Simulation'}
-              >
-                {stream.isPaused ? '▶ RESUME' : '⏸ PAUSE'}
-              </button>
-
-              <button
-                className="action-btn-ctrl stop-btn"
-                onClick={handleStopSimulation}
-                title="Stop Simulation and Return to Standby"
-              >
-                ⏹ STOP
-              </button>
-            </>
+            <button
+              className="action-btn-ctrl stop-btn"
+              onClick={handleStopSimulation}
+              title="Stop Simulation (keeps chart and trades)"
+            >
+              ⏹ STOP
+            </button>
           )}
 
           {/* Reset */}
           <button
             className="action-btn-ctrl reset"
             onClick={handleResetSystem}
-            title="Clean Master Reset"
+            title="Clean Master Reset — Clear all chart data and trades"
           >
             🔄 RESET
           </button>
@@ -304,7 +301,7 @@ export default function App() {
               neurotransmitters={stream.neurotransmitters}
               symbol={currentMarket.symbol || 'GOLD/INR'}
               isPaused={stream.isPaused}
-              isRunning={running}
+              isRunning={hasStarted && !stream.isPaused}
               onManualClose={handleManualClose}
             />
           </div>

@@ -68,11 +68,6 @@ export function useEventStream(enabled, onResetTrigger) {
       buf.current = []
 
       setState((prev) => {
-        // If paused, only process unpause or reset events
-        const hasUnpause = batch.some((b) => (b.type === 'pause_toggled' && b.data.paused === false) || b.type === 'reset')
-        if (prev.isPaused && !hasUnpause) {
-          return prev
-        }
 
         let s = { ...prev.stats }
         let candles = [...prev.candles]
