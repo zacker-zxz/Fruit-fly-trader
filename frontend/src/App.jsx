@@ -18,6 +18,11 @@ export default function App() {
   const [hasStarted, setHasStarted] = useState(false)
   const [currentSpeed, setCurrentSpeed] = useState(1)
   const [currentMultiplier, setCurrentMultiplier] = useState(10)
+  const [exitMode, setExitMode] = useState('auto')
+  const [useManualTpSl, setUseManualTpSl] = useState(false)
+  const [takeProfitPct, setTakeProfitPct] = useState(0.015)
+  const [stopLossPct, setStopLossPct] = useState(0.010)
+  const [maxHoldTicks, setMaxHoldTicks] = useState(8)
 
   // Modals & Drawers
   const [showMarketModal, setShowMarketModal] = useState(false)
@@ -69,6 +74,9 @@ export default function App() {
     if (params.speed) setCurrentSpeed(params.speed)
     if (params.multiplier) setCurrentMultiplier(params.multiplier)
 
+    const chosenExitMode = params.exitMode || exitMode
+    const chosenManualTpSl = params.useManualTpSl !== undefined ? params.useManualTpSl : useManualTpSl
+
     await fetch('/api/simulation/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -79,6 +87,35 @@ export default function App() {
         multiplier: params.multiplier || currentMultiplier,
         initial_capital_inr: params.initial_capital_inr || 500000,
         currency: 'INR',
+        exit_mode: chosenExitMode,
+        use_manual_tp_sl: chosenManualTpSl,
+        take_profit_pct: params.takeProfitPct || takeProfitPct,
+        stop_loss_pct: params.stopLossPct || stopLossPct,
+        max_hold_ticks: params.maxHoldTicks || maxHoldTicks,
+      }),
+    }).catch(() => {})
+  }
+
+  const handleSaveSettings = async (cfg) => {
+    if (cfg.exitMode) setExitMode(cfg.exitMode)
+    if (cfg.useManualTpSl !== undefined) setUseManualTpSl(cfg.useManualTpSl)
+    if (cfg.takeProfitPct !== undefined) setTakeProfitPct(cfg.takeProfitPct)
+    if (cfg.stopLossPct !== undefined) setStopLossPct(cfg.stopLossPct)
+    if (cfg.maxHoldTicks !== undefined) setMaxHoldTicks(cfg.maxHoldTicks)
+    if (cfg.multiplier) {
+      setCurrentMultiplier(cfg.multiplier)
+    }
+
+    await fetch('/api/simulation/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        exit_mode: cfg.exitMode,
+        use_manual_tp_sl: cfg.useManualTpSl,
+        take_profit_pct: cfg.takeProfitPct,
+        stop_loss_pct: cfg.stopLossPct,
+        max_hold_ticks: cfg.maxHoldTicks,
+        multiplier: cfg.multiplier,
       }),
     }).catch(() => {})
   }
@@ -196,6 +233,18 @@ export default function App() {
             <span className="tk-label">Status</span>
             <span className={`tk-value ${!hasStarted ? '' : stream.isPaused ? 'gold' : 'green'}`}>
               {!hasStarted ? 'STANDBY' : stream.isPaused ? '⏹ STOPPED' : `● LIVE (${currentSpeed}x)`}
+            </span>
+          </div>
+
+          <div
+            className="topbar-metric-item clickable"
+            onClick={() => setShowSettingsModal(true)}
+            title="Trade Exit Strategy: Click to change in Settings"
+            style={{ cursor: 'pointer' }}
+          >
+            <span className="tk-label">Exit Mode</span>
+            <span className={`tk-value ${(stream.wallet?.exit_mode || exitMode) === 'auto' ? 'green bold' : 'gold bold'}`}>
+              {(stream.wallet?.exit_mode || exitMode) === 'auto' ? '🪰 AUTO (FLY)' : '🎯 MANUAL TP/SL'}
             </span>
           </div>
         </div>
@@ -411,9 +460,14 @@ export default function App() {
                 currency: stream.wallet?.currency || 'INR',
                 initialCapital: stream.wallet?.initial_capital_inr || 500000,
                 multiplier: currentMultiplier,
+                exitMode: stream.wallet?.exit_mode || exitMode,
+                useManualTpSl: stream.wallet?.use_manual_tp_sl !== undefined ? stream.wallet.use_manual_tp_sl : useManualTpSl,
+                takeProfitPct: stream.wallet?.take_profit_pct !== undefined ? stream.wallet.take_profit_pct : takeProfitPct,
+                stopLossPct: stream.wallet?.stop_loss_pct !== undefined ? stream.wallet.stop_loss_pct : stopLossPct,
+                maxHoldTicks: maxHoldTicks,
               }}
               onSaveSettings={(cfg) => {
-                if (cfg.multiplier) handleMultiplierChange(cfg.multiplier)
+                handleSaveSettings(cfg)
                 setShowSettingsModal(false)
               }}
               onResetSystem={() => {

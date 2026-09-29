@@ -145,6 +145,8 @@ class SimulationRunner:
             max_concurrent_trades=cfg.get("max_concurrent_trades", 3),
             hold_ticks_min=cfg.get("hold_ticks_min", 5),
             hold_ticks_max=cfg.get("hold_ticks_max", 60),
+            exit_mode=cfg.get("exit_mode", "auto"),
+            use_manual_tp_sl=cfg.get("use_manual_tp_sl", False),
         )
 
         # 4. Emit initial historical snapshot so the candlestick chart opens immediately populated
@@ -229,6 +231,10 @@ class SimulationRunner:
                     "decision": decision,
                     "cortisol": brain.cortisol,
                     "dopamine": brain.dopamine,
+                    "rsi": market_feats.get("rsi", 0.0),
+                    "momentum": market_feats.get("momentum", 0.0),
+                    "reversal_signal": market_feats.get("reversal_signal", 0.0),
+                    "volatility": market_feats.get("volatility", 0.1),
                 }
                 closed_trades = self.trade_engine.update_mark(candle, tick, brain_state=brain_state)
                 for ct in closed_trades:

@@ -30,9 +30,10 @@ class MicroTrade:
     exit_tick: int = 0
     exit_ts: float = 0.0
     exit_price: float = 0.0
-    exit_reason: str = "OPEN"  # OPEN, PROFIT_BOOKED, STOPPED_OUT, EXPIRED, BRAIN_REVERSAL
+    exit_reason: str = "OPEN"  # OPEN, PROFIT_BOOKED, STOPPED_OUT, EXPIRED, BRAIN_REVERSAL, DOPAMINE_SATISFACTION, CORTISOL_DEFENSE, TRAILING_PROFIT, AUTO_PROFIT_BOOKED
     pnl_inr: float = 0.0
     pnl_pct: float = 0.0
+    peak_pnl_pct: float = 0.0  # High-water mark for trailing exit decisions
     status: str = "OPEN"       # OPEN or CLOSED
 
     @property
@@ -57,6 +58,8 @@ class MicroTradingEngine:
         max_concurrent_trades: int = 3,
         hold_ticks_min: int = 5,
         hold_ticks_max: int = 60,
+        exit_mode: str = "auto",
+        use_manual_tp_sl: bool = False,
     ):
         self.currency = currency
         self.initial_capital_inr = initial_capital_inr
@@ -73,6 +76,8 @@ class MicroTradingEngine:
         self.hold_ticks_max = hold_ticks_max
         self.market_currency = market_currency
         self.usd_inr_rate = max(1.0, float(usd_inr_rate))
+        self.exit_mode = exit_mode
+        self.use_manual_tp_sl = use_manual_tp_sl
         
         self.open_trades: list[MicroTrade] = []
         self.closed_trades: list[MicroTrade] = []
@@ -103,8 +108,28 @@ class MicroTradingEngine:
         if rate and rate > 0:
             self.usd_inr_rate = float(rate)
 
+    def set_risk_rules(
+        self,
+        exit_mode: str | None = None,
+        use_manual_tp_sl: bool | None = None,
+        take_profit_pct: float | None = None,
+        stop_loss_pct: float | None = None,
+        max_hold_ticks: int | None = None,
+    ) -> None:
+        """Update risk rules and exit mode dynamically in-flight."""
+        if exit_mode is not None:
+            self.exit_mode = exit_mode
+        if use_manual_tp_sl is not None:
+            self.use_manual_tp_sl = bool(use_manual_tp_sl)
+        if take_profit_pct is not None:
+            self.take_profit_pct = float(take_profit_pct)
+        if stop_loss_pct is not None:
+            self.stop_loss_pct = float(stop_loss_pct)
+        if max_hold_ticks is not None:
+            self.max_hold_ticks = int(max_hold_ticks)
+
     def update_mark(self, candle: Candle, tick: int, brain_state: dict | None = None) -> list[MicroTrade]:
-        """Mark open positions to current price; trigger automatic take-profit / stop-loss / brain exits."""
+        """Mark open positions to current price; trigger automatic biological or manual exits."""
         newly_closed = []
         cost_rate = (self.fee_bps + self.slippage_bps) / 10000.0
 
@@ -112,41 +137,71 @@ class MicroTradingEngine:
         decision = b_state.get("decision")
         cortisol = b_state.get("cortisol", 0.2)
         dopamine = b_state.get("dopamine", 0.5)
+        rsi = b_state.get("rsi", 0.0)
+        reversal_signal = b_state.get("reversal_signal", 0.0)
+        momentum = b_state.get("momentum", 0.0)
 
         for trade in list(self.open_trades):
             raw_ret = (candle.close - trade.entry_price) / trade.entry_price
             dir_ret = raw_ret if trade.side == "UP" else -raw_ret
             net_ret = (dir_ret * trade.multiplier) - cost_rate
 
+            # Track high-water mark for trailing decisions
+            if net_ret > trade.peak_pnl_pct:
+                trade.peak_pnl_pct = net_ret
+
             duration = tick - trade.entry_tick
             
             should_close = False
             reason = "OPEN"
 
-            # 1. Active Brain Reversal (Fly changes direction based on visual/cognitive shift)
-            if (trade.side == "UP" and decision == "SELL") or (trade.side == "DOWN" and decision == "BUY"):
-                should_close = True
-                reason = "BRAIN_REVERSAL"
-            # 2. Cortisol Spike (Aversive stress reflex / risk aversion after drawdown)
-            elif cortisol > 0.45 and net_ret < -0.003:
-                should_close = True
-                reason = "CORTISOL_DEFENSE"
-            # 3. Dopamine Satisfaction (Fly secures positive reward surge)
-            elif dopamine > 0.65 and net_ret >= 0.008:
-                should_close = True
-                reason = "DOPAMINE_SATISFACTION"
-            # 4. Take Profit booked
-            elif net_ret >= self.take_profit_pct * trade.multiplier:
-                should_close = True
-                reason = "PROFIT_BOOKED"
-            # 5. Stop Loss
-            elif net_ret <= -self.stop_loss_pct * trade.multiplier:
-                should_close = True
-                reason = "STOPPED_OUT"
-            # 6. Brain Stochastic Hold Horizon Expiry (5s to 50s random window)
-            elif duration >= trade.max_hold_ticks:
-                should_close = True
-                reason = "EXPIRED"
+            # Check if Manual Bracket mode is activated
+            is_manual_mode = self.use_manual_tp_sl or (self.exit_mode == "manual")
+
+            if is_manual_mode:
+                # ── MANUAL BRACKET MODE (Fixed TP and Fixed SL as configured by user) ──
+                if net_ret >= self.take_profit_pct * trade.multiplier:
+                    should_close = True
+                    reason = "PROFIT_BOOKED"
+                elif net_ret <= -self.stop_loss_pct * trade.multiplier:
+                    should_close = True
+                    reason = "STOPPED_OUT"
+                elif (trade.side == "UP" and decision == "SELL") or (trade.side == "DOWN" and decision == "BUY"):
+                    should_close = True
+                    reason = "BRAIN_REVERSAL"
+                elif duration >= trade.max_hold_ticks:
+                    should_close = True
+                    reason = "EXPIRED"
+
+            else:
+                # ── AUTO MODE (THE FRUIT FLY DECIDES WHEN TO BOOK PROFIT AND CUT LOSS) ──
+                # 1. Active Brain Reversal: Motor command actively reverses position
+                if (trade.side == "UP" and decision == "SELL") or (trade.side == "DOWN" and decision == "BUY"):
+                    should_close = True
+                    reason = "BRAIN_REVERSAL"
+                # 2. Cortisol Defense: Stress hormone surge cuts trade to protect capital
+                elif cortisol > 0.38 and net_ret < -0.003:
+                    should_close = True
+                    reason = "CORTISOL_DEFENSE"
+                # 3. Dopamine Satisfaction: Reward center peaks; fly secures positive payoff
+                elif dopamine > 0.58 and net_ret >= 0.004:
+                    should_close = True
+                    reason = "DOPAMINE_SATISFACTION"
+                # 4. Biological Trailing Profit: Locks in gains after peak profit (gives back > 30%)
+                elif trade.peak_pnl_pct >= 0.008 and net_ret <= (trade.peak_pnl_pct * 0.70):
+                    should_close = True
+                    reason = "TRAILING_PROFIT"
+                # 5. Optical Sensory Exhaustion: Eyes detect momentum reversal or oscillator extreme
+                elif trade.side == "UP" and (rsi > 0.60 or reversal_signal < -0.25 or momentum < -0.25) and net_ret > 0.003:
+                    should_close = True
+                    reason = "AUTO_PROFIT_BOOKED"
+                elif trade.side == "DOWN" and (rsi < -0.60 or reversal_signal > 0.25 or momentum > 0.25) and net_ret > 0.003:
+                    should_close = True
+                    reason = "AUTO_PROFIT_BOOKED"
+                # 6. Brain Stochastic Hold Horizon Expiry: Attention span expires
+                elif duration >= trade.max_hold_ticks:
+                    should_close = True
+                    reason = "EXPIRED"
 
             if should_close:
                 closed = self._close_trade(trade, candle, tick, reason, net_ret)
@@ -287,6 +342,10 @@ class MicroTradingEngine:
             "currency": self.currency,
             "currency_symbol": "₹" if self.currency == "INR" else "$",
             "usd_inr_rate": round(self.usd_inr_rate, 4),
+            "exit_mode": self.exit_mode,
+            "use_manual_tp_sl": self.use_manual_tp_sl,
+            "take_profit_pct": self.take_profit_pct,
+            "stop_loss_pct": self.stop_loss_pct,
             "initial_capital_inr": round(self.initial_capital_inr, 2),
             "balance_inr": round(self.balance_inr, 2),
             "used_margin_inr": round(used_margin, 2),

@@ -76,6 +76,8 @@ class SimulationStartRequest(BaseModel):
     brain_threshold: float = Field(default=0.8, ge=0.1, le=5.0)
     learning_rate: float = Field(default=0.01, ge=0.0001, le=1.0)
     usd_inr_rate: float = Field(default=83.75, ge=1.0, le=500.0)
+    exit_mode: str = Field(default="auto")
+    use_manual_tp_sl: bool = Field(default=False)
 
     @field_validator("dataset")
     @classmethod
@@ -94,6 +96,15 @@ class SpeedUpdateRequest(BaseModel):
 
 class MultiplierUpdateRequest(BaseModel):
     multiplier: int = Field(default=10, ge=1, le=50)
+
+
+class SettingsUpdateRequest(BaseModel):
+    exit_mode: Optional[str] = Field(default="auto")
+    use_manual_tp_sl: Optional[bool] = Field(default=False)
+    take_profit_pct: Optional[float] = Field(default=None, ge=0.001, le=0.5)
+    stop_loss_pct: Optional[float] = Field(default=None, ge=0.001, le=0.5)
+    max_hold_ticks: Optional[int] = Field(default=None, ge=2, le=200)
+    multiplier: Optional[int] = Field(default=None, ge=1, le=50)
 
 
 class PauseRequest(BaseModel):
@@ -170,6 +181,8 @@ async def start_simulation(payload: SimulationStartRequest) -> dict:
         "stop_loss_pct": payload.stop_loss_pct,
         "max_hold_ticks": payload.max_hold_ticks,
         "usd_inr_rate": payload.usd_inr_rate,
+        "exit_mode": payload.exit_mode,
+        "use_manual_tp_sl": payload.use_manual_tp_sl,
         "wallet": {
             "initial_capital_inr": payload.initial_capital_inr,
             "currency": payload.currency,
@@ -290,6 +303,36 @@ def resume_simulation() -> dict:
         active_runner.is_paused = False
         _on_event({"type": "pause_toggled", "paused": False})
         return {"status": "resumed", "paused": False}
+    return {"status": "no_active_runner"}
+
+
+@app.post("/api/simulation/settings")
+def update_settings(payload: SettingsUpdateRequest) -> dict:
+    """Dynamically updates risk rules, exit mode (Auto biological vs Manual TP/SL), and multiplier."""
+    global active_runner
+    if active_runner:
+        if hasattr(active_runner, "trade_engine") and active_runner.trade_engine:
+            active_runner.trade_engine.set_risk_rules(
+                exit_mode=payload.exit_mode,
+                use_manual_tp_sl=payload.use_manual_tp_sl,
+                take_profit_pct=payload.take_profit_pct,
+                stop_loss_pct=payload.stop_loss_pct,
+                max_hold_ticks=payload.max_hold_ticks,
+            )
+        if payload.multiplier is not None:
+            active_runner.set_multiplier(payload.multiplier)
+        _on_event({
+            "type": "settings_updated",
+            "exit_mode": payload.exit_mode,
+            "use_manual_tp_sl": payload.use_manual_tp_sl,
+            "take_profit_pct": payload.take_profit_pct,
+            "stop_loss_pct": payload.stop_loss_pct,
+        })
+        return {
+            "status": "ok",
+            "exit_mode": payload.exit_mode,
+            "use_manual_tp_sl": payload.use_manual_tp_sl,
+        }
     return {"status": "no_active_runner"}
 
 
