@@ -87,20 +87,26 @@ Unlike black-box statistical models or brute-force deep learning, this system gr
 - **Octopamine ($OA$)**: Scales with market turbulence, sharpening optical perception gain.
 - **Serotonin ($5\text{-}HT$)**: Governs impulse control, preventing over-trading and rapid flipping.
 
-### 3. High-Frequency Micro-Trading Desk
+### 3. High-Frequency Micro-Trading Desk & Autonomous Exits
 - **Dual Currency Accounting**: Primary INR (₹) wallet with live USD ($) conversion.
 - **Configurable Multiplier Leverage**: 1x, 2x, 5x, 10x, 20x, 50x.
 - **Multi-Position Tracking**: Supports multiple concurrent active trades, each with independent entry price, margin stake, and stochastic hold duration (5s to 60s).
-- **Biological Exit Triggers**: Hard take-profit, stop-loss, brain reversal, cortisol reflex, or attention span expiry.
+- **Autonomous Biological Exits (Default)**: Instead of rigid static percentages, the fruit fly's neural connectome dynamically decides when to take profit and cut loss based on:
+  - **Dopamine Satiation (`DOPAMINE_SATISFACTION`)**: Locks in gains dynamically when reward centers surge (+0.4%~+0.8%).
+  - **Cortisol Defense (`CORTISOL_DEFENSE`)**: Stress reflex cuts losses early to protect capital during adverse market shocks.
+  - **Trailing Momentum Protection (`TRAILING_PROFIT`)**: Locks in gains if price retraces >30% from peak return.
+  - **Optic Sensory Reversal (`AUTO_PROFIT_BOOKED`)**: Compound eyes detect oscillator divergence (RSI) and counter-momentum.
+  - **Central Complex Motor Reversal (`BRAIN_REVERSAL`)**: Steering neurons actively flip direction against the active trade.
+- **Manual Bracket Mode Option**: If desired, users can toggle **Manual TP/SL Brackets** in Settings to enforce fixed percentage take-profit and stop-loss targets.
 
 ### 4. Interactive Cyber-Tech UI
 - **Trading Desk Canvas**: Native HTML5 Canvas rendering high-density candlestick bars, volume histogram, moving averages, and live execution arrows (`▲ UP`, `▼ DN`).
 - **3D Connectome Visualizer**: Renders active somatic clusters across Optic, Antennal, Mushroom Body, and Central Complex networks.
 - **Full Simulation Controls**:
   - `▶ START`: Initiates the simulation on demand (does not auto-start unexpectedly).
-  - `⏸ PAUSE` / `▶ RESUME`: Halts or unpauses ticks dynamically.
-  - `⏹ STOP`: Cleanly terminates the active run and returns to Standby.
-  - `🔄 RESET`: Flushes all open orders and neural weights back to baseline.
+  - `⏹ STOP`: Pauses the active run in place preserving all candlestick chart history, PnL, and active trades.
+  - `▶ RESUME`: Seamlessly continues execution from the exact stopped tick.
+  - `🔄 RESET`: Complete reset flushes all open orders, charts, and neural weights back to baseline.
   - `Close`: Instant manual market-order liquidation of active positions.
   - Biological Speed pills: `1x`, `5x`, `10x`, `20x`.
 
@@ -176,7 +182,7 @@ npm run dev
 4. **Adjust Speed**: Switch between `1x` (1 second per tick/candle), `5x`, `10x`, or `20x`.
 5. **Adjust Multiplier**: Open the **`💼 WALLET`** drawer to tune leverage (e.g., 5x, 10x, 25x).
 6. **Inspect Decisions**: Observe how the fruit fly's dopamine surges on profitable runs, and cortisol induces hesitation during choppy periods.
-7. **Pause or Stop**: Click **`⏸ PAUSE`** to freeze the market, or **`⏹ STOP`** to cleanly return to standby.
+7. **Stop and Resume**: Click **`⏹ STOP`** to halt ticks in place without wiping the chart or metrics, and **`▶ RESUME`** to seamlessly continue. Use **`🔄 RESET`** whenever you want a completely fresh run.
 
 ---
 
@@ -186,13 +192,15 @@ npm run dev
 | :--- | :--- | :--- |
 | `GET` | `/api/datasets/info` | List all available market datasets with volatility, tick size, and asset metadata. |
 | `GET` | `/api/simulation/status` | Current status (`idle`, `running`, `paused`), active speed, and multiplier. |
-| `POST`| `/api/simulation/start` | Start simulation with dataset, speed, multiplier, and biological seed. |
+| `POST`| `/api/simulation/start` | Start simulation with dataset, speed, multiplier, exit mode, and biological seed. |
 | `POST`| `/api/simulation/pause` | Toggle simulation pause / resume. |
+| `POST`| `/api/simulation/stop` | Stop simulation runner in place preserving chart and trade state. |
+| `POST`| `/api/simulation/resume` | Resume simulation runner from stopped state. |
+| `POST`| `/api/simulation/reset` | Terminate runner, flush buffers, and reset state. |
+| `POST`| `/api/simulation/settings` | Dynamically update exit mode (Auto vs. Manual TP/SL), risk rules, and multiplier. |
 | `POST`| `/api/simulation/speed` | Dynamically update simulation speed multiplier (`1` to `100`). |
 | `POST`| `/api/simulation/multiplier` | Dynamically update trading leverage multiplier (`1` to `50`). |
 | `POST`| `/api/simulation/manual_close`| Manually liquidate all open trades at current mark price. |
-| `POST`| `/api/simulation/stop` | Terminate runner and cleanly return to standby. |
-| `POST`| `/api/simulation/reset` | Terminate runner, flush buffers, and reset state. |
 | `GET` | `/api/events` | High-frequency Server-Sent Events (SSE) streaming live candles, trades, wallet, and neural telemetry. |
 
 ---
@@ -206,7 +214,7 @@ Run backend tests:
 cd backend
 pytest
 ```
-*Expect all 30 tests to pass in < 1 second.*
+*Expect all 31 tests to pass in < 1 second.*
 
 ---
 
